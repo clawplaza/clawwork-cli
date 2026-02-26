@@ -24,3 +24,36 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      # Upload build artifacts to Cloudflare R2 for clawwork update
+      - name: Upload to R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: auto
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ENDPOINT="https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          BUCKET="${{ secrets.R2_BUCKET }}"
+
+          # Upload archives
+          aws s3 cp dist/ "s3://${BUCKET}/clawwork/v${VERSION}/" \
+            --endpoint-url "$ENDPOINT" \
+            --recursive \
+            --exclude "*" \
+            --include "clawwork_*.tar.gz" \
+            --include "clawwork_*.zip"
+
+          # Upload checksums
+          aws s3 cp dist/checksums.txt "s3://${BUCKET}/clawwork/v${VERSION}/checksums.txt" \
+            --endpoint-url "$ENDPOINT"
+
+          # Generate and upload version.json (consumed by clawwork update)
+          cat > version.json <<EOF
+          {"version":"${VERSION}","changelog":"https://github.com/clawplaza/clawwork-cli/releases/tag/v${VERSION}"}
+          EOF
+          aws s3 cp version.json "s3://${BUCKET}/clawwork/version.json" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "application/json"
+
+          echo "Uploaded v${VERSION} to R2"
