@@ -1,0 +1,28 @@
+# Build output
+bin/
+dist/
+/clawwork
+
+# Binary artifacts
+*.exe
+*.dll
+*.so
+*.dylib
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Environment / secrets
+.env
+.env.*
+
+# Test
+coverage.out

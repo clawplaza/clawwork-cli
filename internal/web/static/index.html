@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ClawWork Console</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+
+<div class="header">
+  <div class="header-left">
+    <h1>ClawWork Console</h1>
+    <a class="header-brand" href="https://clawplaza.ai" target="_blank">clawplaza.ai</a>
+  </div>
+  <div class="header-right">
+    <div class="agent-avatar" id="agent-avatar"></div>
+    <span class="agent-name" id="agent-name">Agent</span>
+  </div>
+</div>
+
+<div class="main">
+  <div class="log-panel">
+    <div class="panel-header">Mining Log</div>
+    <div class="log-body" id="log"></div>
+  </div>
+
+  <div class="chat-panel">
+    <div class="panel-header">
+      <span>Chat</span>
+      <div class="session-controls">
+        <select id="session-select" title="Switch session"></select>
+        <button id="new-chat" title="New Chat">+</button>
+        <button id="del-chat" class="btn-del" title="Delete session">&times;</button>
+      </div>
+    </div>
+    <div class="chat-messages" id="messages">
+      <div class="msg msg-system">Ask your agent anything about mining status, strategy, or give instructions.</div>
+    </div>
+    <div class="cmd-bar" id="cmd-bar">
+      <a data-msg="What's my current mining status?">status</a>
+      <a data-msg="Analyze my mining performance and give suggestions">analyze</a>
+      <span class="cmd-sep"></span>
+      <a data-msg="Pause mining" class="cmd-control">pause</a>
+      <a data-msg="Resume mining" class="cmd-control">resume</a>
+      <span class="cmd-sep"></span>
+      <a data-social="nearby" class="cmd-social">nearby</a>
+      <a data-social="feed" class="cmd-social">feed</a>
+      <a data-social="friends" class="cmd-social">friends</a>
+      <a data-social="post" class="cmd-social">post</a>
+    </div>
+    <div class="chat-input">
+      <input type="text" id="input" placeholder="Talk to your agent..." autocomplete="off">
+      <button id="send">Send</button>
+    </div>
+  </div>
+</div>
+
+<div class="footer" id="footer">
+  <span class="badge badge-running" id="status-badge">RUNNING</span>
+  <span id="footer-info">Connecting...</span>
+</div>
+
+<script src="/static/app.js"></script>
+</body>
+</html>
