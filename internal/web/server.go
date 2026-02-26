@@ -145,7 +145,7 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) handleIndex(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	data, _ := staticFS.ReadFile("static/index.html")
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
@@ -191,7 +191,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
@@ -202,7 +202,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"reply":  reply,
 		"action": actionResult,
 	})
@@ -229,7 +229,7 @@ func (s *Server) executeAction(a *Action) string {
 
 func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"paused":           s.ctrl.IsPaused(),
 		"token_id":         s.ctrl.TokenID(),
 		"agent_name":       s.agent.Name,
@@ -242,7 +242,7 @@ func (s *Server) handleState(w http.ResponseWriter, _ *http.Request) {
 
 func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"sessions": s.store.ListSessions(),
 		"current":  s.store.CurrentSessionID(),
 	})
@@ -251,7 +251,7 @@ func (s *Server) handleListSessions(w http.ResponseWriter, _ *http.Request) {
 func (s *Server) handleNewSession(w http.ResponseWriter, _ *http.Request) {
 	id := s.store.NewSession()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{
+	_ = json.NewEncoder(w).Encode(map[string]string{
 		"id": id,
 	})
 }
@@ -267,12 +267,12 @@ func (s *Server) handleSwitchSession(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusNotFound)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"id":       id,
 		"messages": messages,
 	})
@@ -288,12 +288,12 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	if err := s.store.DeleteSession(id); err != nil {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"ok": "deleted"})
+	_ = json.NewEncoder(w).Encode(map[string]string{"ok": "deleted"})
 }
 
 // ── Social endpoints ──
@@ -324,12 +324,12 @@ func (s *Server) handleSocialGet(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("social GET failed", "module", module, "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 func (s *Server) handleSocialPost(w http.ResponseWriter, r *http.Request) {
@@ -352,16 +352,16 @@ func (s *Server) handleSocialPost(w http.ResponseWriter, r *http.Request) {
 		// Forward the upstream response body if available (e.g. COOLDOWN with retry_after).
 		if len(data) > 0 {
 			w.WriteHeader(http.StatusBadGateway)
-			w.Write(data)
+			_, _ = w.Write(data)
 		} else {
 			w.WriteHeader(http.StatusBadGateway)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
 		}
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	w.Write(data)
+	_, _ = w.Write(data)
 }
 
 // handleGenerateMoment uses the agent's LLM to generate a moment, then posts it.
@@ -371,7 +371,7 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 		remaining := int(time.Until(s.momentCooldownUntil).Seconds())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
-		json.NewEncoder(w).Encode(map[string]any{
+		_ = json.NewEncoder(w).Encode(map[string]any{
 			"cooldown":    true,
 			"retry_after": remaining,
 		})
@@ -404,7 +404,7 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("moment generation failed", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate moment: " + err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to generate moment: " + err.Error()})
 		return
 	}
 
@@ -442,7 +442,7 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 
 				w.Header().Set("Content-Type", "application/json")
 				w.WriteHeader(http.StatusTooManyRequests)
-				json.NewEncoder(w).Encode(map[string]any{
+				_ = json.NewEncoder(w).Encode(map[string]any{
 					"cooldown":    true,
 					"retry_after": retryAfter,
 					"content":     content,
@@ -454,7 +454,7 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 		slog.Warn("moment post failed", "error", err)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusBadGateway)
-		json.NewEncoder(w).Encode(map[string]string{"error": "Failed to post moment: " + err.Error()})
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "Failed to post moment: " + err.Error()})
 		return
 	}
 
@@ -463,7 +463,7 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 
 	// Return both the generated text and the API response.
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]any{
+	_ = json.NewEncoder(w).Encode(map[string]any{
 		"content":     content,
 		"response":    json.RawMessage(postResp),
 		"cooldown":    true,

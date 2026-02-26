@@ -195,7 +195,7 @@ type SessionStore struct {
 
 // NewSessionStore creates a store, loading the most recent session or creating a new one.
 func NewSessionStore(dir string, provider llm.Provider, state *miner.State, ctrl *MinerControl) *SessionStore {
-	os.MkdirAll(dir, 0700)
+	_ = os.MkdirAll(dir, 0700)
 	store := &SessionStore{
 		dir:      dir,
 		provider: provider,
@@ -343,7 +343,7 @@ func (s *SessionStore) saveToDisk(sess *ChatSession) {
 		return
 	}
 	path := filepath.Join(s.dir, sess.id+".json")
-	os.WriteFile(path, b, 0600)
+	_ = os.WriteFile(path, b, 0600)
 }
 
 func (s *SessionStore) loadFromDisk(id string) (*Session, error) {

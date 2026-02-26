@@ -499,7 +499,7 @@ func runInsc(cmd *cobra.Command, _ []string) error {
 				defer func() {
 					shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 3*time.Second)
 					defer shutdownCancel()
-					srv.Shutdown(shutdownCtx)
+					_ = srv.Shutdown(shutdownCtx)
 				}()
 				fmt.Printf("Console: http://127.0.0.1:%d\n", actualPort)
 			}
