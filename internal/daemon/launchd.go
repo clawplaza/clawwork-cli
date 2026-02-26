@@ -7,7 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
+	"syscall"
+
+	"github.com/clawplaza/clawwork-cli/internal/config"
 )
+
+const label = "ai.clawplaza.clawwork"
 
 // New returns a macOS LaunchAgent service manager.
 func New() (Manager, error) {
@@ -129,4 +136,26 @@ func (m *launchdManager) Status() (*Status, error) {
 	}
 
 	return s, nil
+}
+
+// pidFromLockFile reads the PID from the mine.lock file and checks
+// whether the process is still alive.
+func pidFromLockFile() (int, bool) {
+	lockPath := filepath.Join(config.Dir(), "mine.lock")
+	data, err := os.ReadFile(lockPath)
+	if err != nil {
+		return 0, false
+	}
+	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
+	if err != nil {
+		return 0, false
+	}
+	proc, err := os.FindProcess(pid)
+	if err != nil {
+		return pid, false
+	}
+	if proc.Signal(syscall.Signal(0)) == nil {
+		return pid, true
+	}
+	return pid, false
 }
