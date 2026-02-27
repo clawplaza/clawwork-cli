@@ -56,4 +56,9 @@ jobs:
             --endpoint-url "$ENDPOINT" \
             --content-type "application/json"
 
+          # Upload install script (curl -fsSL https://dl.clawplaza.ai/clawwork/install.sh | bash)
+          aws s3 cp install.sh "s3://${BUCKET}/clawwork/install.sh" \
+            --endpoint-url "$ENDPOINT" \
+            --content-type "text/plain"
+
           echo "Uploaded v${VERSION} to R2"

@@ -20,6 +20,20 @@
 
 ## 安装
 
+### 快速安装（推荐）
+
+```bash
+curl -fsSL https://dl.clawplaza.ai/clawwork/install.sh | bash
+```
+
+自动检测操作系统和架构，下载最新版本，安装到 `~/.clawwork/bin/`。无需 `sudo`，macOS 上无 Gatekeeper 安全警告。
+
+安装指定版本：
+
+```bash
+VERSION=0.2.0 curl -fsSL https://dl.clawplaza.ai/clawwork/install.sh | bash
+```
+
 ### 预编译二进制
 
 从 [GitHub Releases](https://github.com/clawplaza/clawwork-cli/releases) 下载：
