@@ -15,6 +15,7 @@ import (
 
 	"github.com/clawplaza/clawwork-cli/internal/llm"
 	"github.com/clawplaza/clawwork-cli/internal/miner"
+	"github.com/clawplaza/clawwork-cli/internal/tools"
 )
 
 const (
@@ -86,6 +87,9 @@ type ChatSession struct {
 }
 
 // Chat processes a user message and returns the agent's reply plus any action.
+// If the provider supports tool calling (tools.ChatToolProvider), the agentic
+// loop is used — the agent may call http_fetch or run_script before replying.
+// Otherwise falls back to the simple single-turn Answer() path.
 func (s *ChatSession) Chat(ctx context.Context, userMsg string) (string, *Action, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -98,14 +102,22 @@ func (s *ChatSession) Chat(ctx context.Context, userMsg string) (string, *Action
 		s.title = truncateTitle(userMsg, 50)
 	}
 
-	prompt := s.buildPrompt()
-
-	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second) // longer for tool rounds
 	defer cancel()
 
-	reply, err := s.provider.Answer(ctx, prompt)
+	var reply string
+	var err error
+
+	if tp, ok := s.provider.(tools.ChatToolProvider); ok && mightNeedTools(userMsg) {
+		// Agentic path: tool-calling loop (only when the message likely needs tools).
+		msgs := s.buildToolMessages()
+		reply, err = tools.RunAgentLoop(ctx, tp, msgs, tools.Defaults())
+	} else {
+		// Simple path: single-turn answer (conversational messages or non-tool providers).
+		reply, err = s.provider.Answer(ctx, s.buildPrompt())
+	}
+
 	if err != nil {
-		// Remove failed user message.
 		s.history = s.history[:len(s.history)-1]
 		return "", nil, err
 	}
@@ -139,12 +151,10 @@ func (s *ChatSession) toSession() *Session {
 	}
 }
 
-// buildPrompt constructs the user-role message with mining context and
-// conversation history. The system prompt is already set on the provider.
-func (s *ChatSession) buildPrompt() string {
+// buildMiningContext returns a short text block with the current mining status.
+// Used as a prefix in both the simple and tool-calling paths.
+func (s *ChatSession) buildMiningContext() string {
 	var sb strings.Builder
-
-	// Mining context (dynamic).
 	sb.WriteString("--- Current Mining Status ---\n")
 	sb.WriteString(fmt.Sprintf("Session inscriptions: %d\n", s.state.TotalInscriptions))
 	sb.WriteString(fmt.Sprintf("Total CW earned: %d\n", s.state.TotalCWEarned))
@@ -155,7 +165,6 @@ func (s *ChatSession) buildPrompt() string {
 		ago := time.Since(s.state.LastMineAt).Truncate(time.Second)
 		sb.WriteString(fmt.Sprintf("Last inscription: %s ago\n", ago))
 	}
-
 	if s.ctrl != nil {
 		sb.WriteString(fmt.Sprintf("Target token: #%d\n", s.ctrl.TokenID()))
 		if s.ctrl.IsPaused() {
@@ -164,6 +173,14 @@ func (s *ChatSession) buildPrompt() string {
 			sb.WriteString("Mining status: RUNNING\n")
 		}
 	}
+	return sb.String()
+}
+
+// buildPrompt constructs the user-role message with mining context and
+// conversation history for the simple (non-tool) Answer() path.
+func (s *ChatSession) buildPrompt() string {
+	var sb strings.Builder
+	sb.WriteString(s.buildMiningContext())
 	sb.WriteString("\n")
 
 	// Conversation history.
@@ -177,8 +194,28 @@ func (s *ChatSession) buildPrompt() string {
 
 	// Latest user message.
 	sb.WriteString(s.history[len(s.history)-1].Content)
-
 	return sb.String()
+}
+
+// buildToolMessages constructs the messages slice for the agentic tool-calling path.
+// The provider will prepend the system prompt automatically; this returns only
+// conversation messages. The latest user message is prefixed with mining context.
+func (s *ChatSession) buildToolMessages() []tools.Message {
+	msgs := make([]tools.Message, 0, len(s.history))
+
+	// Conversation history (all but the latest message).
+	for _, h := range s.history[:len(s.history)-1] {
+		msgs = append(msgs, tools.Message{Role: h.Role, Content: h.Content})
+	}
+
+	// Latest user message prefixed with current mining context.
+	latest := s.history[len(s.history)-1]
+	msgs = append(msgs, tools.Message{
+		Role:    "user",
+		Content: s.buildMiningContext() + "\n" + latest.Content,
+	})
+
+	return msgs
 }
 
 // ── SessionStore (multi-session manager with persistence) ──
@@ -431,6 +468,30 @@ func cleanActionMarkers(reply string) string {
 	return strings.TrimSpace(actionRe.ReplaceAllString(reply, ""))
 }
 
+// mightNeedTools returns true if the message likely requires a tool call.
+// Simple conversational messages skip the agentic path to save ~300 tokens.
+var toolKeywords = []string{
+	// network / fetch
+	"http", "https", "curl", "wget", "fetch", "url", "api", "request", "download",
+	// file / fs
+	"file", "folder", "directory", "mkdir", "create", "write", "read", "open", "save",
+	"path", "dir ", "/", "~",
+	// script / exec
+	"run", "execute", "script", "python", "node", "javascript", "bash", "shell", "command",
+	// data
+	"json", "csv", "parse", "search", "find", "grep",
+}
+
+func mightNeedTools(msg string) bool {
+	lower := strings.ToLower(msg)
+	for _, kw := range toolKeywords {
+		if strings.Contains(lower, kw) {
+			return true
+		}
+	}
+	return false
+}
+
 func truncateTitle(s string, maxLen int) string {
 	// Use rune-aware truncation for CJK.
 	runes := []rune(s)
@@ -454,11 +515,21 @@ func ChatSystemPrompt(soul string) string {
 
 	sb.WriteString("You assist your owner with questions about mining status, performance, and strategy.\n")
 	sb.WriteString("You can also control mining behavior when the owner asks.\n\n")
-	sb.WriteString("Available actions (include the exact marker in your reply when the user requests):\n")
+
+	sb.WriteString("## Tools available\n")
+	sb.WriteString("You have access to built-in tools — use them proactively. Never say you cannot perform an action if a tool can do it.\n")
+	sb.WriteString("- shell_exec: Execute any shell command (curl, wget, git, grep, jq, etc.). Most flexible.\n")
+	sb.WriteString("- http_fetch: Native Go HTTP GET/POST (no shell required).\n")
+	sb.WriteString("- run_script: Execute Python or JavaScript code locally.\n")
+	sb.WriteString("- filesystem: Local file operations — operation=read/write/list/mkdir/move/delete/info.\n\n")
+
+	sb.WriteString("## Mining control actions\n")
+	sb.WriteString("Include the exact marker in your reply when the user requests a control action:\n")
 	sb.WriteString("- [ACTION:pause] — pause mining\n")
 	sb.WriteString("- [ACTION:resume] — resume mining\n")
 	sb.WriteString("- [ACTION:token:NNN] — switch to token #NNN (must be 25-1024)\n\n")
-	sb.WriteString("Rules:\n")
+
+	sb.WriteString("## Rules\n")
 	sb.WriteString("- Only use ACTION markers when the user explicitly requests an action\n")
 	sb.WriteString("- Respond in the same language the user writes in\n")
 	sb.WriteString("- Be concise but helpful\n")

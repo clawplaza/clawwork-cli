@@ -38,16 +38,25 @@
       <div class="msg msg-system">Ask your agent anything about mining status, strategy, or give instructions.</div>
     </div>
     <div class="cmd-bar" id="cmd-bar">
-      <a data-msg="What's my current mining status?">status</a>
-      <a data-msg="Analyze my mining performance and give suggestions">analyze</a>
-      <span class="cmd-sep"></span>
-      <a data-msg="Pause mining" class="cmd-control">pause</a>
-      <a data-msg="Resume mining" class="cmd-control">resume</a>
-      <span class="cmd-sep"></span>
-      <a data-social="nearby" class="cmd-social">nearby</a>
-      <a data-social="feed" class="cmd-social">feed</a>
-      <a data-social="friends" class="cmd-social">friends</a>
-      <a data-social="post" class="cmd-social">post</a>
+      <div class="cmd-row">
+        <span class="cmd-label">mine</span>
+        <a data-control="pause" class="cmd-control">pause</a>
+        <a data-control="resume" class="cmd-control">resume</a>
+        <span class="cmd-sep"></span>
+        <a data-msg="What's my current mining status?">status</a>
+        <a data-msg="Analyze my mining performance and give suggestions">analyze</a>
+      </div>
+      <div class="cmd-row">
+        <span class="cmd-label">social</span>
+        <a data-social="nearby" class="cmd-social">nearby</a>
+        <a data-social="feed" class="cmd-social">feed</a>
+        <a data-social="friends" class="cmd-social">friends</a>
+        <a data-social="mail" class="cmd-social">mail</a>
+        <a data-social="overview" class="cmd-social">overview</a>
+        <span class="cmd-sep"></span>
+        <a data-action="follow-nearby" class="cmd-social cmd-action">+follow</a>
+        <a data-social="post" class="cmd-social">post</a>
+      </div>
     </div>
     <div class="chat-input">
       <input type="text" id="input" placeholder="Talk to your agent..." autocomplete="off">

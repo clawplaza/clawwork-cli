@@ -82,9 +82,13 @@ func New(chatProvider llm.Provider, state *miner.State, tokenID int, agent Agent
 	mux.HandleFunc("POST /sessions", s.handleNewSession)
 	mux.HandleFunc("POST /sessions/{id}", s.handleSwitchSession)
 	mux.HandleFunc("DELETE /sessions/{id}", s.handleDeleteSession)
+	mux.HandleFunc("POST /control/pause", s.handleDirectPause)
+	mux.HandleFunc("POST /control/resume", s.handleDirectResume)
 	mux.HandleFunc("GET /social", s.handleSocialGet)
+	mux.HandleFunc("GET /social/overview", s.handleSocialOverview)
 	mux.HandleFunc("POST /social", s.handleSocialPost)
 	mux.HandleFunc("POST /social/moment", s.handleGenerateMoment)
+	mux.HandleFunc("POST /social/follow-nearby", s.handleFollowNearby)
 
 	s.httpSrv = &http.Server{
 		Addr:    fmt.Sprintf("127.0.0.1:%d", port),
@@ -296,6 +300,22 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]string{"ok": "deleted"})
 }
 
+// ── Direct mining control endpoints (no LLM involved) ──
+
+func (s *Server) handleDirectPause(w http.ResponseWriter, _ *http.Request) {
+	s.ctrl.Pause()
+	s.hub.Publish(Event{Type: "control", Message: "Mining paused"})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "paused"})
+}
+
+func (s *Server) handleDirectResume(w http.ResponseWriter, _ *http.Request) {
+	s.ctrl.Resume()
+	s.hub.Publish(Event{Type: "control", Message: "Mining resumed"})
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{"status": "running"})
+}
+
 // ── Social endpoints ──
 
 func (s *Server) handleSocialGet(w http.ResponseWriter, r *http.Request) {
@@ -362,6 +382,150 @@ func (s *Server) handleSocialPost(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_, _ = w.Write(data)
+}
+
+// handleSocialOverview aggregates connections data into a social overview card.
+func (s *Server) handleSocialOverview(w http.ResponseWriter, r *http.Request) {
+	data, err := s.api.SocialGet(r.Context(), "connections", nil)
+	if err != nil {
+		slog.Warn("social overview: connections failed", "error", err)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	// Parse connections to extract counts.
+	var conn struct {
+		Data struct {
+			Friends   []json.RawMessage `json:"friends"`
+			Following []json.RawMessage `json:"following"`
+			Followers []json.RawMessage `json:"followers"`
+		} `json:"data"`
+		Friends   []json.RawMessage `json:"friends"`
+		Following []json.RawMessage `json:"following"`
+		Followers []json.RawMessage `json:"followers"`
+	}
+	_ = json.Unmarshal(data, &conn)
+
+	// Normalize: try data.* first, fallback to top-level.
+	friends := conn.Data.Friends
+	if len(friends) == 0 {
+		friends = conn.Friends
+	}
+	following := conn.Data.Following
+	if len(following) == 0 {
+		following = conn.Following
+	}
+	followers := conn.Data.Followers
+	if len(followers) == 0 {
+		followers = conn.Followers
+	}
+
+	// Try to fetch unread mail count (best-effort; ignore error).
+	unreadCount := -1
+	mailData, mailErr := s.api.SocialGet(r.Context(), "mail", map[string]string{"unread": "true"})
+	if mailErr == nil {
+		var mailResp struct {
+			Data struct {
+				Mails []json.RawMessage `json:"mails"`
+			} `json:"data"`
+			Mails  []json.RawMessage `json:"mails"`
+			Unread int               `json:"unread_count"`
+		}
+		if json.Unmarshal(mailData, &mailResp) == nil {
+			if mailResp.Unread > 0 {
+				unreadCount = mailResp.Unread
+			} else {
+				mails := mailResp.Data.Mails
+				if len(mails) == 0 {
+					mails = mailResp.Mails
+				}
+				unreadCount = len(mails)
+			}
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"friends_count":   len(friends),
+		"following_count": len(following),
+		"followers_count": len(followers),
+		"unread_mail":     unreadCount,
+		"token_id":        s.ctrl.TokenID(),
+	})
+}
+
+// handleFollowNearby picks the first nearby miner not yet followed and follows them.
+func (s *Server) handleFollowNearby(w http.ResponseWriter, r *http.Request) {
+	params := map[string]string{"token_id": strconv.Itoa(s.ctrl.TokenID())}
+	nearbyData, err := s.api.SocialGet(r.Context(), "nearby", params)
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		return
+	}
+
+	var nearby struct {
+		Data struct {
+			Miners []nearbyMiner `json:"miners"`
+		} `json:"data"`
+		Miners []nearbyMiner `json:"miners"`
+	}
+	if err := json.Unmarshal(nearbyData, &nearby); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusInternalServerError)
+		_ = json.NewEncoder(w).Encode(map[string]string{"error": "failed to parse nearby response"})
+		return
+	}
+
+	miners := nearby.Data.Miners
+	if len(miners) == 0 {
+		miners = nearby.Miners
+	}
+
+	for _, m := range miners {
+		if m.AgentID == "" || m.IsFriend || m.IFollow {
+			continue
+		}
+		// Follow this agent.
+		resp, followErr := s.api.SocialPost(r.Context(), map[string]any{
+			"module":    "follow",
+			"target_id": m.AgentID,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		if followErr != nil {
+			if len(resp) > 0 {
+				w.WriteHeader(http.StatusBadGateway)
+				_, _ = w.Write(resp)
+			} else {
+				w.WriteHeader(http.StatusBadGateway)
+				_ = json.NewEncoder(w).Encode(map[string]string{"error": followErr.Error()})
+			}
+			return
+		}
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"followed":     m.DisplayName,
+			"agent_id":     m.AgentID,
+			"api_response": json.RawMessage(resp),
+		})
+		return
+	}
+
+	// All nearby miners already followed.
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"message": fmt.Sprintf("Already following all nearby miners on token #%d", s.ctrl.TokenID()),
+	})
+}
+
+// nearbyMiner is used when parsing the nearby API response.
+type nearbyMiner struct {
+	AgentID     string `json:"agent_id"`
+	DisplayName string `json:"display_name"`
+	IsFriend    bool   `json:"is_friend"`
+	IFollow     bool   `json:"i_follow"`
 }
 
 // handleGenerateMoment uses the agent's LLM to generate a moment, then posts it.

@@ -9,6 +9,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/clawplaza/clawwork-cli/internal/tools"
 )
 
 // OpenAIProvider implements Provider for any OpenAI-compatible API
@@ -120,6 +122,186 @@ func (p *OpenAIProvider) Answer(ctx context.Context, prompt string) (string, err
 
 func (p *OpenAIProvider) Name() string {
 	return fmt.Sprintf("openai-compat (%s)", p.model)
+}
+
+// ── Tool-calling support (OpenAI function-calling protocol) ──────────────────
+
+// openToolCallFunc holds the name and JSON arguments of a tool call.
+type openToolCallFunc struct {
+	Name      string `json:"name"`
+	Arguments string `json:"arguments"`
+}
+
+// openToolCall is an individual tool invocation returned by the LLM.
+type openToolCall struct {
+	ID       string           `json:"id"`
+	Type     string           `json:"type"` // always "function"
+	Function openToolCallFunc `json:"function"`
+}
+
+// toolReqMessage is one message in a tool-aware chat request.
+// Content is a pointer to allow JSON null (required when tool_calls is set).
+type toolReqMessage struct {
+	Role       string         `json:"role"`
+	Content    *string        `json:"content"`               // null when tool_calls present
+	ToolCallID string         `json:"tool_call_id,omitempty"` // for role=tool
+	ToolCalls  []openToolCall `json:"tool_calls,omitempty"`  // for role=assistant
+}
+
+// openFuncSpec is the function definition inside a tool spec.
+type openFuncSpec struct {
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Parameters  any    `json:"parameters"` // JSON Schema object
+}
+
+// openToolSpec is the full tool entry sent to the LLM.
+type openToolSpec struct {
+	Type     string       `json:"type"` // always "function"
+	Function openFuncSpec `json:"function"`
+}
+
+// toolChatReq is the request body for a tool-aware chat completion.
+type toolChatReq struct {
+	Model      string           `json:"model"`
+	Messages   []toolReqMessage `json:"messages"`
+	MaxTokens  int              `json:"max_tokens,omitempty"`
+	Tools      []openToolSpec   `json:"tools,omitempty"`
+	ToolChoice string           `json:"tool_choice,omitempty"`
+}
+
+// toolChatResp is the response body for a tool-aware chat completion.
+type toolChatResp struct {
+	Choices []struct {
+		Message struct {
+			Content   *string        `json:"content"`
+			ToolCalls []openToolCall `json:"tool_calls,omitempty"`
+		} `json:"message"`
+		FinishReason string `json:"finish_reason"`
+	} `json:"choices"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// strPtr returns a pointer to s. Used to produce JSON string vs null for Content.
+func strPtr(s string) *string { return &s }
+
+// ChatWithTools implements tools.ChatToolProvider.
+// It prepends the configured system prompt, converts messages to OpenAI format,
+// and sends a single /chat/completions request with tool definitions.
+func (p *OpenAIProvider) ChatWithTools(
+	ctx context.Context,
+	messages []tools.Message,
+	toolDefs []tools.ToolDef,
+) (string, []tools.ToolCall, string, error) {
+	// Build OpenAI-format messages: system first, then caller messages.
+	reqMsgs := make([]toolReqMessage, 0, len(messages)+1)
+	if p.systemPrompt != "" {
+		reqMsgs = append(reqMsgs, toolReqMessage{
+			Role:    "system",
+			Content: strPtr(p.systemPrompt),
+		})
+	}
+	for _, m := range messages {
+		rm := toolReqMessage{Role: m.Role, ToolCallID: m.ToolCallID}
+		if m.Content != "" {
+			rm.Content = strPtr(m.Content)
+		}
+		for _, tc := range m.ToolCalls {
+			rm.ToolCalls = append(rm.ToolCalls, openToolCall{
+				ID:   tc.ID,
+				Type: "function",
+				Function: openToolCallFunc{
+					Name:      tc.Name,
+					Arguments: tc.ArgsJSON,
+				},
+			})
+		}
+		reqMsgs = append(reqMsgs, rm)
+	}
+
+	// Build tool specs.
+	specs := make([]openToolSpec, len(toolDefs))
+	for i, td := range toolDefs {
+		specs[i] = openToolSpec{
+			Type: "function",
+			Function: openFuncSpec{
+				Name:        td.Name,
+				Description: td.Description,
+				Parameters:  td.Parameters,
+			},
+		}
+	}
+
+	req := toolChatReq{
+		Model:      p.model,
+		Messages:   reqMsgs,
+		MaxTokens:  p.maxTokens,
+		Tools:      specs,
+		ToolChoice: "auto",
+	}
+
+	body, err := json.Marshal(req)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("marshal: %w", err)
+	}
+
+	url := p.baseURL + "/chat/completions"
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
+	if err != nil {
+		return "", nil, "", fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
+
+	resp, err := p.client.Do(httpReq)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", nil, "", fmt.Errorf("read response: %w", err)
+	}
+	if resp.StatusCode != 200 {
+		return "", nil, "", fmt.Errorf("LLM returned %d: %s", resp.StatusCode, truncateStr(string(respBody), 200))
+	}
+
+	var chatResp toolChatResp
+	if err := json.Unmarshal(respBody, &chatResp); err != nil {
+		return "", nil, "", fmt.Errorf("parse response: %w", err)
+	}
+	if chatResp.Error != nil {
+		return "", nil, "", fmt.Errorf("LLM error: %s", chatResp.Error.Message)
+	}
+	if len(chatResp.Choices) == 0 {
+		return "", nil, "", fmt.Errorf("LLM returned empty choices")
+	}
+
+	choice := chatResp.Choices[0]
+	finishReason := choice.FinishReason
+
+	// Tool calls requested — convert to tools.ToolCall slice.
+	if finishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
+		calls := make([]tools.ToolCall, len(choice.Message.ToolCalls))
+		for i, tc := range choice.Message.ToolCalls {
+			calls[i] = tools.ToolCall{
+				ID:       tc.ID,
+				Name:     tc.Function.Name,
+				ArgsJSON: tc.Function.Arguments,
+			}
+		}
+		return "", calls, finishReason, nil
+	}
+
+	// Final text reply.
+	content := ""
+	if choice.Message.Content != nil {
+		content = strings.TrimSpace(*choice.Message.Content)
+	}
+	return content, nil, finishReason, nil
 }
 
 // extractConclusion pulls the last non-empty paragraph from a thinking model's
