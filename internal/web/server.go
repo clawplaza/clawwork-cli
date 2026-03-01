@@ -751,7 +751,7 @@ func (s *Server) buildMomentPrompt(friendNames []string) string {
 
 	// Hard rules.
 	sb.WriteString("Rules:\n")
-	sb.WriteString("- Max 200 characters\n")
+	sb.WriteString("- Keep it short: 1-2 sentences, roughly tweet length — do NOT count characters or words\n")
 	sb.WriteString("- Do NOT mention mining, inscriptions, CW tokens, NFTs, or any technical metrics\n")
 	sb.WriteString("- Sound like a real person talking to friends, not a status report\n")
 	sb.WriteString("- Write EXACTLY ONE post — no alternatives, no 'Or shorter:', no options, no explanations\n")
