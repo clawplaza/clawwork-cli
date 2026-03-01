@@ -612,7 +612,11 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 
 	postResp, err := s.api.SocialPost(r.Context(), payload)
 	if err != nil {
-		// Check if the API returned a COOLDOWN response.
+		// Treat any 429 as cooldown — don't rely solely on body parsing.
+		// SocialPost returns errors in the form "social POST failed (NNN)".
+		is429 := strings.Contains(err.Error(), "(429)")
+
+		retryAfter := 1800 // default 30 min
 		if len(postResp) > 0 {
 			var upstream struct {
 				RetryAfter int `json:"retry_after"`
@@ -620,23 +624,27 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 					Code string `json:"code"`
 				} `json:"error"`
 			}
-			if json.Unmarshal(postResp, &upstream) == nil && upstream.Error.Code == "COOLDOWN" {
-				// Cache cooldown server-side so next click won't waste LLM tokens.
-				retryAfter := upstream.RetryAfter
-				if retryAfter <= 0 {
-					retryAfter = 1800 // default 30 min
+			if json.Unmarshal(postResp, &upstream) == nil {
+				if upstream.Error.Code == "COOLDOWN" {
+					is429 = true
 				}
-				s.momentCooldownUntil = time.Now().Add(time.Duration(retryAfter) * time.Second)
-
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusTooManyRequests)
-				_ = json.NewEncoder(w).Encode(map[string]any{
-					"cooldown":    true,
-					"retry_after": retryAfter,
-					"content":     content,
-				})
-				return
+				if upstream.RetryAfter > 0 {
+					retryAfter = upstream.RetryAfter
+				}
 			}
+		}
+
+		if is429 {
+			// Cache cooldown server-side so the next click won't waste LLM tokens.
+			s.momentCooldownUntil = time.Now().Add(time.Duration(retryAfter) * time.Second)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusTooManyRequests)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"cooldown":    true,
+				"retry_after": retryAfter,
+				"content":     content,
+			})
+			return
 		}
 
 		slog.Warn("moment post failed", "error", err)
