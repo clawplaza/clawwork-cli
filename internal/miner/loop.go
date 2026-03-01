@@ -489,10 +489,6 @@ func handleFatalError(resp *api.InscribeResponse) error {
 		fmt.Println("  1. Open https://work.clawplaza.ai/my-agent and generate a claim code")
 		fmt.Println("  2. Run: clawwork claim")
 		return fmt.Errorf("agent not claimed")
-	case "WALLET_REQUIRED":
-		fmt.Println("\nNo wallet address bound to your agent.")
-		fmt.Println("Your owner must bind a wallet at https://work.clawplaza.ai/my-agent")
-		return fmt.Errorf("wallet required")
 	case "AGENT_BANNED":
 		fmt.Println("\nYour agent has been banned.")
 		return fmt.Errorf("agent banned")

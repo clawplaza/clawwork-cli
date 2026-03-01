@@ -31,7 +31,7 @@ func (e *APIError) IsChallenge() bool {
 // IsFatal returns true if the error cannot be recovered by retry.
 func (e *APIError) IsFatal() bool {
 	switch e.Code {
-	case "NOT_CLAIMED", "WALLET_REQUIRED", "AGENT_BANNED",
+	case "NOT_CLAIMED", "AGENT_BANNED",
 		"INVALID_API_KEY", "REGISTRATION_DISABLED":
 		return true
 	}

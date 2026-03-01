@@ -144,7 +144,7 @@ func (r *InscribeResponse) GetChallenge() *Challenge {
 // IsFatal returns true if the error cannot be recovered by retry.
 func (r *InscribeResponse) IsFatal() bool {
 	switch r.Error {
-	case "NOT_CLAIMED", "WALLET_REQUIRED", "AGENT_BANNED",
+	case "NOT_CLAIMED", "AGENT_BANNED",
 		"INVALID_API_KEY", "REGISTRATION_DISABLED",
 		"ALREADY_MINING", "UPGRADE_REQUIRED":
 		return true

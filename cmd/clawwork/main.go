@@ -216,8 +216,7 @@ func runInitNew(scanner *bufio.Scanner) error {
 		claimed := runClaimStep(scanner, client)
 		if claimed {
 			fmt.Println()
-			fmt.Println("Claimed! Next: bind a wallet address at https://work.clawplaza.ai/my-agent")
-			fmt.Println("Then run: clawwork insc")
+			fmt.Println("Claimed! Run: clawwork insc")
 		} else {
 			fmt.Println()
 			fmt.Println("To claim later, run: clawwork claim")
