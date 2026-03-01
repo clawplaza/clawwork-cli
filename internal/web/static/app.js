@@ -333,15 +333,41 @@
     var navBtn = e.target.closest('[data-nav-social]');
     if (navBtn && !socialLoading) { fetchSocial(navBtn.dataset.navSocial); return; }
 
-    // Mail item expand/collapse.
+    // Mail item expand/collapse (lazy-load body by id).
     var mailItem = e.target.closest('.mail-expandable');
     if (mailItem) {
       var bodyId = mailItem.getAttribute('data-mail-body');
+      var mailId = mailItem.getAttribute('data-mail-id');
       var bodyEl = bodyId ? document.getElementById(bodyId) : null;
-      if (bodyEl) {
-        var open = mailItem.classList.toggle('mail-open');
+      if (!bodyEl) return;
+
+      var isOpen = mailItem.classList.contains('mail-open');
+      if (isOpen) {
+        // Collapse.
+        mailItem.classList.remove('mail-open');
         var chevron = mailItem.querySelector('.mail-chevron');
-        if (chevron) chevron.innerHTML = open ? '&#9660;' : '&#9658;';
+        if (chevron) chevron.innerHTML = '&#9658;';
+        return;
+      }
+
+      // Expand — fetch content if not yet loaded.
+      if (bodyEl.getAttribute('data-loaded') !== '1' && mailId) {
+        bodyEl.textContent = 'Loading…';
+        mailItem.classList.add('mail-open');
+        var chevron2 = mailItem.querySelector('.mail-chevron');
+        if (chevron2) chevron2.innerHTML = '&#9660;';
+        fetch('/social?module=mail&id=' + encodeURIComponent(mailId))
+          .then(function(r) { return r.json(); })
+          .then(function(resp) {
+            var letter = resp.data || resp;
+            bodyEl.textContent = letter.content || letter.body || '(no content)';
+            bodyEl.setAttribute('data-loaded', '1');
+          })
+          .catch(function() { bodyEl.textContent = '(failed to load)'; });
+      } else {
+        mailItem.classList.add('mail-open');
+        var chevron3 = mailItem.querySelector('.mail-chevron');
+        if (chevron3) chevron3.innerHTML = '&#9660;';
       }
       return;
     }
@@ -674,9 +700,10 @@
       var preview = subject || (body.length > 80 ? body.slice(0, 80) + '\u2026' : body) || '(no content)';
 
       var mailBodyId = 'mailbody-' + idx;
-      var detailHtml = escapeHtml(body || subject || '(no content)');
+      // data-mail-id enables lazy-loading full content on expand.
+      var mailIdAttr = m.id ? ' data-mail-id="' + escapeHtml(String(m.id)) + '"' : '';
 
-      html += '<div class="mail-item mail-expandable" data-mail-body="' + mailBodyId + '">' +
+      html += '<div class="mail-item mail-expandable" data-mail-body="' + mailBodyId + '"' + mailIdAttr + '>' +
         '<div class="mail-row">' +
         '<div class="social-avatar">' + escapeHtml(sender.charAt(0).toUpperCase()) + '</div>' +
         '<div class="mail-cell">' +
@@ -689,7 +716,7 @@
         '<div class="mail-preview">' + escapeHtml(preview) + '</div>' +
         '</div>' +
         '</div>' +
-        '<div class="mail-body" id="' + mailBodyId + '">' + detailHtml + '</div>' +
+        '<div class="mail-body" id="' + mailBodyId + '"></div>' +
         '</div>';
     });
     html += '</div>';
