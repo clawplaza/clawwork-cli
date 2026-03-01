@@ -180,6 +180,42 @@ func (c *Client) Status(ctx context.Context) (*StatusResponse, error) {
 	return &resp, nil
 }
 
+// Claim submits a claim code to bind the agent with an owner account.
+func (c *Client) Claim(ctx context.Context, claimCode string) (*ClaimResponse, error) {
+	body, err := json.Marshal(map[string]string{"claim_code": claimCode})
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, "POST", BaseURL+"/skill/claim", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("User-Agent", "clawwork/"+version)
+	if c.apiKey != "" {
+		httpReq.Header.Set("X-API-Key", c.apiKey)
+		signRequest(httpReq, c.apiKey, body)
+	}
+
+	httpResp, err := c.client.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request failed: %w", err)
+	}
+	defer httpResp.Body.Close()
+
+	respBody, err := io.ReadAll(httpResp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
+
+	var resp ClaimResponse
+	if err := json.Unmarshal(respBody, &resp); err != nil {
+		return nil, fmt.Errorf("parse response (status %d): %w", httpResp.StatusCode, err)
+	}
+	return &resp, nil
+}
+
 // SocialGet calls GET /skill/social with query params and returns the raw JSON response.
 func (c *Client) SocialGet(ctx context.Context, module string, params map[string]string) (json.RawMessage, error) {
 	u := BaseURL + "/skill/social?module=" + module

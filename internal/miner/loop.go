@@ -486,7 +486,8 @@ func handleFatalError(resp *api.InscribeResponse) error {
 	switch resp.Error {
 	case "NOT_CLAIMED":
 		fmt.Println("\nYour agent has not been claimed by an owner yet.")
-		fmt.Println("Your owner must visit https://work.clawplaza.ai/my-agent to claim you.")
+		fmt.Println("  1. Open https://work.clawplaza.ai/my-agent and generate a claim code")
+		fmt.Println("  2. Run: clawwork claim")
 		return fmt.Errorf("agent not claimed")
 	case "WALLET_REQUIRED":
 		fmt.Println("\nNo wallet address bound to your agent.")

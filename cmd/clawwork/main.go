@@ -40,7 +40,7 @@ func main() {
 		Long:  "ClawWork CLI — Official client for the ClawWork AI Agent labor market.",
 	}
 
-	root.AddCommand(initCmd(), inscCmd(), statusCmd(), configCmd(), soulCmd(), specCmd(), versionCmd(), updateCmd(),
+	root.AddCommand(initCmd(), inscCmd(), claimCmd(), statusCmd(), configCmd(), soulCmd(), specCmd(), versionCmd(), updateCmd(),
 		installCmd(), uninstallCmd(), startCmd(), stopCmd(), restartCmd())
 
 	if err := root.Execute(); err != nil {
@@ -207,10 +207,21 @@ func runInitNew(scanner *bufio.Scanner) error {
 		}
 		fmt.Println("\nRun 'clawwork insc' to begin when ready.")
 	} else {
-		fmt.Println("\nNext steps:")
-		fmt.Println("  1. Your owner must claim this agent at https://work.clawplaza.ai/my-agent")
-		fmt.Println("  2. Your owner must bind a wallet address")
-		fmt.Println("  3. Then run: clawwork insc")
+		fmt.Println("\nNext: claim this agent with your ClawWork account.")
+		fmt.Println()
+		fmt.Println("  1. Open https://work.clawplaza.ai/my-agent in your browser")
+		fmt.Println("  2. Log in and click \"Generate Claim Code\"")
+		fmt.Println("  3. Paste the code here  (press Enter to skip and claim later)")
+		fmt.Println()
+		claimed := runClaimStep(scanner, client)
+		if claimed {
+			fmt.Println()
+			fmt.Println("Claimed! Next: bind a wallet address at https://work.clawplaza.ai/my-agent")
+			fmt.Println("Then run: clawwork insc")
+		} else {
+			fmt.Println()
+			fmt.Println("To claim later, run: clawwork claim")
+		}
 	}
 
 	return nil
@@ -295,6 +306,94 @@ func runInitExisting(scanner *bufio.Scanner) error {
 
 	fmt.Println("\nRun 'clawwork insc' to begin when ready.")
 	return nil
+}
+
+// ── claim command ──
+
+func claimCmd() *cobra.Command {
+	return &cobra.Command{
+		Use:   "claim",
+		Short: "Claim agent with your ClawWork account using a claim code",
+		RunE:  runClaim,
+	}
+}
+
+func runClaim(_ *cobra.Command, _ []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config not found — run 'clawwork init' first: %w", err)
+	}
+
+	client := api.New(cfg.Agent.APIKey)
+	scanner := bufio.NewScanner(os.Stdin)
+
+	fmt.Println("Claim this agent with your ClawWork account.")
+	fmt.Println()
+	fmt.Println("  1. Open https://work.clawplaza.ai/my-agent in your browser")
+	fmt.Println("  2. Log in and click \"Generate Claim Code\"")
+	fmt.Println("  3. Paste the code here  (press Enter to cancel)")
+	fmt.Println()
+
+	if runClaimStep(scanner, client) {
+		fmt.Println()
+		fmt.Println("Claimed! Next: bind a wallet address at https://work.clawplaza.ai/my-agent")
+		fmt.Println("Then run: clawwork insc")
+	}
+	return nil
+}
+
+// runClaimStep prompts for a claim code and submits it.
+// Returns true if the agent was successfully claimed (or was already claimed).
+func runClaimStep(scanner *bufio.Scanner, client *api.Client) bool {
+	errMsgs := map[string]string{
+		"INVALID_OR_EXPIRED_CODE": "Code invalid or expired — generate a new one at https://work.clawplaza.ai/my-agent",
+		"INVALID_CODE":            "Code format invalid. Expected: clawplaza-xxxx",
+		"AGENT_NOT_FOUND":         "Agent not found. Check your API key.",
+		"USER_ALREADY_CLAIMED":    "That account already has a linked agent.",
+	}
+
+	for {
+		fmt.Print("Claim code: ")
+		scanner.Scan()
+		code := strings.TrimSpace(scanner.Text())
+		if code == "" {
+			fmt.Println("Skipped.")
+			return false
+		}
+
+		fmt.Print("Claiming... ")
+		resp, err := client.Claim(context.Background(), code)
+		if err != nil {
+			fmt.Printf("error: %s\n", err)
+			fmt.Println("Try again or press Enter to skip.")
+			continue
+		}
+
+		if resp.Error == "AGENT_ALREADY_CLAIMED" {
+			// Already claimed is treated as success — idempotent.
+			fmt.Println("already claimed.")
+			return true
+		}
+
+		if resp.Error != "" {
+			msg := errMsgs[resp.Error]
+			if msg == "" {
+				msg = resp.Message
+			}
+			if msg == "" {
+				msg = resp.Error
+			}
+			fmt.Printf("failed: %s\n", msg)
+			fmt.Println("Try again or press Enter to skip.")
+			continue
+		}
+
+		fmt.Println("done!")
+		if resp.DisplayName != "" {
+			fmt.Printf("Linked to: %s\n", resp.DisplayName)
+		}
+		return true
+	}
 }
 
 // collectLLMConfig prompts the user for LLM provider settings.

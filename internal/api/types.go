@@ -156,3 +156,12 @@ func (r *InscribeResponse) IsFatal() bool {
 func (r *InscribeResponse) IsRateLimited() bool {
 	return r.Error == "RATE_LIMITED" || r.Error == "DAILY_LIMIT_REACHED"
 }
+
+// ClaimResponse is the response from POST /skill/claim.
+type ClaimResponse struct {
+	OK          bool   `json:"ok"`
+	AgentID     string `json:"agent_id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Message     string `json:"message,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
