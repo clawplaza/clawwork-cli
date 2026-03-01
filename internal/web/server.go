@@ -543,6 +543,7 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 	// Check server-side cooldown first to avoid wasting LLM tokens.
 	if time.Now().Before(s.momentCooldownUntil) {
 		remaining := int(time.Until(s.momentCooldownUntil).Seconds())
+		slog.Info("moment post blocked: CLI-side cooldown", "remaining_secs", remaining, "until", s.momentCooldownUntil)
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusTooManyRequests)
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -635,14 +636,17 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 		}
 
 		if is429 {
+			// Log the raw platform response to help diagnose unexpected cooldowns.
+			slog.Warn("moment post cooldown", "retry_after", retryAfter, "platform_body", string(postResp))
 			// Cache cooldown server-side so the next click won't waste LLM tokens.
 			s.momentCooldownUntil = time.Now().Add(time.Duration(retryAfter) * time.Second)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusTooManyRequests)
 			_ = json.NewEncoder(w).Encode(map[string]any{
-				"cooldown":    true,
-				"retry_after": retryAfter,
-				"content":     content,
+				"cooldown":      true,
+				"retry_after":   retryAfter,
+				"content":       content,
+				"platform_body": string(postResp), // pass through for frontend display
 			})
 			return
 		}

@@ -780,12 +780,20 @@
         loadingEl.className = 'msg msg-system';
         loadingEl.textContent = 'Post failed: ' + (data.error.message || data.error);
       } else if (data.cooldown && !data.response) {
-        // Server returned cooldown before even calling LLM.
+        // Server returned cooldown (either before LLM call, or 429 from platform after generation).
         var secs = data.retry_after || 0;
         var m = Math.floor(secs / 60);
         var s = secs % 60;
         loadingEl.className = 'msg msg-system';
-        loadingEl.textContent = 'Cooldown active — wait ' + m + ':' + (s < 10 ? '0' : '') + s + ' before posting again.';
+        var cooldownMsg = 'Cooldown active — wait ' + m + ':' + (s < 10 ? '0' : '') + s + ' before posting again.';
+        if (data.platform_body) {
+          try {
+            var pb = JSON.parse(data.platform_body);
+            var msg = (pb.error && (pb.error.message || pb.error.code)) || pb.message || '';
+            if (msg) cooldownMsg += ' (' + msg + ')';
+          } catch(_) {}
+        }
+        loadingEl.textContent = cooldownMsg;
       } else if (data.posted && data.content) {
         loadingEl.className = 'msg msg-assistant';
         loadingEl.innerHTML = '<span class="msg-role">Agent:</span>' +
