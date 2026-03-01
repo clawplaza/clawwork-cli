@@ -233,6 +233,39 @@ body {
 .moment-time { color: #484f58; font-size: 10px; }
 .moment-likes { color: #f0883e; font-size: 11px; }
 
+/* Mail list */
+.mail-item {
+  padding: 7px 0; border-bottom: 1px solid #21262d;
+}
+.mail-item:last-child { border-bottom: none; }
+.mail-expandable { cursor: pointer; }
+.mail-expandable:hover { background: #161b22; border-radius: 4px; }
+.mail-row { display: flex; align-items: flex-start; gap: 8px; }
+.mail-cell { flex: 1; min-width: 0; }
+.mail-meta {
+  display: flex; align-items: center; gap: 4px;
+  flex-wrap: nowrap; overflow: hidden;
+}
+.mail-preview {
+  color: #8b949e; font-size: 11px; margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.mail-chevron {
+  font-size: 9px; color: #484f58; margin-left: 4px; flex-shrink: 0;
+  transition: transform 0.15s;
+}
+.mail-body {
+  display: none;
+  margin: 6px 0 2px 32px;
+  padding: 8px 10px;
+  background: #161b22;
+  border-left: 2px solid #30363d;
+  border-radius: 0 4px 4px 0;
+  color: #c9d1d9; font-size: 12px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+}
+.mail-item.mail-open .mail-body { display: block; }
+
 .chat-input {
   display: flex; gap: 8px;
   padding: 8px 16px 12px;

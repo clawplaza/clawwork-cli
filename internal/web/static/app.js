@@ -332,6 +332,19 @@
 
     var navBtn = e.target.closest('[data-nav-social]');
     if (navBtn && !socialLoading) { fetchSocial(navBtn.dataset.navSocial); return; }
+
+    // Mail item expand/collapse.
+    var mailItem = e.target.closest('.mail-expandable');
+    if (mailItem) {
+      var bodyId = mailItem.getAttribute('data-mail-body');
+      var bodyEl = bodyId ? document.getElementById(bodyId) : null;
+      if (bodyEl) {
+        var open = mailItem.classList.toggle('mail-open');
+        var chevron = mailItem.querySelector('.mail-chevron');
+        if (chevron) chevron.innerHTML = open ? '&#9660;' : '&#9658;';
+      }
+      return;
+    }
   });
 
   // Session controls.
@@ -649,21 +662,41 @@
       return '<div class="social-card"><div class="social-card-title">Mail</div>' +
         '<div class="social-empty">No mail yet.</div></div>';
     }
-    var html = '<div class="social-card"><div class="social-card-title">Mail (' + mails.length + ')</div>';
-    mails.forEach(function(m) {
-      // Support both field name conventions.
+    var html = '<div class="social-card"><div class="social-card-title">MAIL (' + mails.length + ')</div>';
+    mails.forEach(function(m, idx) {
       var sender = m.sender_display_name || m.from_name || m.sender_id || m.from_agent_id || 'Unknown';
       var time = m.created_at ? new Date(m.created_at).toLocaleString() : '';
       var isUnread = m.read_at === null || m.read_at === undefined || m.read === false || m.is_read === false;
-      var body = m.content || m.subject || m.body || '(no content)';
-      html += '<div class="moment-item">' +
-        '<div class="moment-header">' +
+      var subject = m.subject || m.title || '';
+      var body = m.content || m.body || '';
+
+      // Determine preview line and whether there's expandable detail.
+      var preview, hasDetail;
+      if (subject) {
+        preview = subject;
+        hasDetail = !!body;
+      } else {
+        preview = body.length > 80 ? body.slice(0, 80) + '\u2026' : body;
+        hasDetail = body.length > 80;
+      }
+      if (!preview) preview = '(no content)';
+
+      var mailBodyId = 'mailbody-' + idx;
+      html += '<div class="mail-item' + (hasDetail ? ' mail-expandable' : '') + '"' +
+        (hasDetail ? ' data-mail-body="' + mailBodyId + '"' : '') + '>' +
+        '<div class="mail-row">' +
         '<div class="social-avatar">' + escapeHtml(sender.charAt(0).toUpperCase()) + '</div>' +
+        '<div class="mail-cell">' +
+        '<div class="mail-meta">' +
         '<span class="social-name">' + escapeHtml(sender) + '</span>' +
-        (isUnread ? ' <span class="social-badge" style="background:#1f6feb;color:#fff">new</span>' : '') +
-        '<span class="moment-time">' + escapeHtml(time) + '</span>' +
+        (isUnread ? ' <span class="social-badge" style="background:#1f6feb;color:#fff;margin-left:4px">new</span>' : '') +
+        '<span class="moment-time" style="margin-left:auto">' + escapeHtml(time) + '</span>' +
+        (hasDetail ? '<span class="mail-chevron">&#9658;</span>' : '') +
         '</div>' +
-        '<div class="social-content">' + escapeHtml(body) + '</div>' +
+        '<div class="mail-preview">' + escapeHtml(preview) + '</div>' +
+        '</div>' +
+        '</div>' +
+        (hasDetail ? '<div class="mail-body" id="' + mailBodyId + '">' + escapeHtml(body) + '</div>' : '') +
         '</div>';
     });
     html += '</div>';
