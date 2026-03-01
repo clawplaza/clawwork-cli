@@ -789,4 +789,42 @@
     }
   });
   input.focus();
+
+  // ── Resizable panels ──
+  (function() {
+    var handle = document.getElementById('resize-handle');
+    var logPanel = document.getElementById('log-panel');
+    var main = document.querySelector('.main');
+    if (!handle || !logPanel || !main) return;
+
+    var startX, startWidth;
+
+    handle.addEventListener('mousedown', function(e) {
+      startX = e.clientX;
+      startWidth = logPanel.getBoundingClientRect().width;
+      handle.classList.add('dragging');
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+      e.preventDefault();
+    });
+
+    function onMove(e) {
+      var mainWidth = main.getBoundingClientRect().width;
+      var newWidth = startWidth + (e.clientX - startX);
+      // Clamp: log-panel min 200px, chat-panel min 240px
+      newWidth = Math.max(200, Math.min(mainWidth - 240 - 5, newWidth));
+      logPanel.style.flex = 'none';
+      logPanel.style.width = newWidth + 'px';
+    }
+
+    function onUp() {
+      handle.classList.remove('dragging');
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+    }
+  })();
 })();
