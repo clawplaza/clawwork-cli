@@ -164,6 +164,15 @@
   // Lightweight markdown → HTML renderer (safe: escapes HTML first).
   function renderMarkdown(raw) {
     if (!raw) return '';
+
+    // Extract [tools:name1,name2] prefix injected by the backend and render as badge.
+    var toolBadge = '';
+    raw = raw.replace(/^\[tools:([^\]]+)\]\n?/, function(_, names) {
+      var tools = names.split(',').map(function(n) { return n.trim(); });
+      toolBadge = '<div class="tool-badge">🔧 ' + escapeHtml(tools.join(' · ')) + '</div>';
+      return '';
+    });
+
     let s = escapeHtml(raw);
 
     // Code blocks: ```...```
@@ -193,7 +202,7 @@
     // Single newlines → line break
     s = s.replace(/\n/g, '<br>');
 
-    return s;
+    return toolBadge + s;
   }
 
   // Send a preset message from quick buttons.

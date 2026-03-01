@@ -400,12 +400,13 @@ func runClaimStep(scanner *bufio.Scanner, client *api.Client) bool {
 func collectLLMConfig(scanner *bufio.Scanner, cfg *config.Config) error {
 	fmt.Println()
 	fmt.Println("LLM provider (for answering challenges):")
-	fmt.Println("  1. Kimi    (kimi-k2.5)         — recommended, free tier available")
-	fmt.Println("  2. OpenAI  (gpt-4o-mini)")
-	fmt.Println("  3. Anthropic (claude-haiku)")
-	fmt.Println("  4. Ollama  (local, free)        — requires ollama installed")
-	fmt.Println("  5. Custom OpenAI-compatible")
-	fmt.Println("  6. Platform                     — requires platform key (plat_xxx)")
+	fmt.Println("  1. Kimi      (kimi-k2.5)        — recommended, free tier available")
+	fmt.Println("  2. DeepSeek  (deepseek-r1)       — open-source reasoning model")
+	fmt.Println("  3. OpenAI    (gpt-4o-mini)")
+	fmt.Println("  4. Anthropic (claude-haiku)")
+	fmt.Println("  5. Ollama    (local, free)       — requires ollama installed")
+	fmt.Println("  6. Custom OpenAI-compatible")
+	fmt.Println("  7. Platform                      — requires platform key (plat_xxx)")
 	fmt.Print("Choose [1]: ")
 	scanner.Scan()
 	providerChoice := strings.TrimSpace(scanner.Text())
@@ -422,16 +423,21 @@ func collectLLMConfig(scanner *bufio.Scanner, cfg *config.Config) error {
 		cfg.LLM.BaseURL = "https://api.moonshot.cn/v1"
 		cfg.LLM.Model = "kimi-k2.5"
 		keyURL = "https://platform.moonshot.cn/console/api-keys"
-	case "2": // OpenAI
+	case "2": // DeepSeek
+		cfg.LLM.Provider = "openai"
+		cfg.LLM.BaseURL = "https://api.deepseek.com/v1"
+		cfg.LLM.Model = "deepseek-reasoner"
+		keyURL = "https://platform.deepseek.com/api_keys"
+	case "3": // OpenAI
 		cfg.LLM.Provider = "openai"
 		cfg.LLM.BaseURL = "https://api.openai.com/v1"
 		cfg.LLM.Model = "gpt-4o-mini"
 		keyURL = "https://platform.openai.com/api-keys"
-	case "3": // Anthropic
+	case "4": // Anthropic
 		cfg.LLM.Provider = "anthropic"
 		cfg.LLM.Model = "claude-haiku-4-5-20251001"
 		keyURL = "https://console.anthropic.com/settings/keys"
-	case "4": // Ollama
+	case "5": // Ollama
 		cfg.LLM.Provider = "ollama"
 		cfg.LLM.BaseURL = "http://localhost:11434"
 		cfg.LLM.Model = "llama3.2"
@@ -441,7 +447,7 @@ func collectLLMConfig(scanner *bufio.Scanner, cfg *config.Config) error {
 			cfg.LLM.Model = m
 		}
 		return nil // no API key needed
-	case "5": // Custom
+	case "6": // Custom
 		cfg.LLM.Provider = "openai"
 		fmt.Print("API base URL: ")
 		scanner.Scan()
@@ -456,7 +462,7 @@ func collectLLMConfig(scanner *bufio.Scanner, cfg *config.Config) error {
 			return fmt.Errorf("model name is required")
 		}
 		keyURL = ""
-	case "6": // Platform
+	case "7": // Platform
 		cfg.LLM.Provider = "platform"
 		fmt.Print("Platform key (plat_xxx): ")
 		scanner.Scan()
@@ -707,8 +713,35 @@ func configCmd() *cobra.Command {
 				fmt.Println(config.Path())
 			},
 		},
+		&cobra.Command{
+			Use:   "llm",
+			Short: "Switch LLM provider and model",
+			RunE:  runConfigLLM,
+		},
 	)
 	return cmd
+}
+
+func runConfigLLM(_ *cobra.Command, _ []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config not found — run 'clawwork init' first: %w", err)
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Printf("Current LLM: %s / %s\n", cfg.LLM.Provider, cfg.LLM.Model)
+
+	if err := collectLLMConfig(scanner, cfg); err != nil {
+		return err
+	}
+
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+
+	fmt.Printf("\nLLM updated: %s / %s\n", cfg.LLM.Provider, cfg.LLM.Model)
+	fmt.Printf("Config saved to %s\n", config.Path())
+	return nil
 }
 
 func runConfigShow(_ *cobra.Command, _ []string) error {

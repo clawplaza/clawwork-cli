@@ -142,10 +142,11 @@ type openToolCall struct {
 // toolReqMessage is one message in a tool-aware chat request.
 // Content is a pointer to allow JSON null (required when tool_calls is set).
 type toolReqMessage struct {
-	Role       string         `json:"role"`
-	Content    *string        `json:"content"`               // null when tool_calls present
-	ToolCallID string         `json:"tool_call_id,omitempty"` // for role=tool
-	ToolCalls  []openToolCall `json:"tool_calls,omitempty"`  // for role=assistant
+	Role             string         `json:"role"`
+	Content          *string        `json:"content"`                        // null when tool_calls present
+	ReasoningContent string         `json:"reasoning_content,omitempty"`    // thinking tokens (Kimi, DeepSeek-R1)
+	ToolCallID       string         `json:"tool_call_id,omitempty"`         // for role=tool
+	ToolCalls        []openToolCall `json:"tool_calls,omitempty"`           // for role=assistant
 }
 
 // openFuncSpec is the function definition inside a tool spec.
@@ -174,8 +175,9 @@ type toolChatReq struct {
 type toolChatResp struct {
 	Choices []struct {
 		Message struct {
-			Content   *string        `json:"content"`
-			ToolCalls []openToolCall `json:"tool_calls,omitempty"`
+			Content          *string        `json:"content"`
+			ReasoningContent string         `json:"reasoning_content,omitempty"` // thinking models
+			ToolCalls        []openToolCall `json:"tool_calls,omitempty"`
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
@@ -194,7 +196,7 @@ func (p *OpenAIProvider) ChatWithTools(
 	ctx context.Context,
 	messages []tools.Message,
 	toolDefs []tools.ToolDef,
-) (string, []tools.ToolCall, string, error) {
+) (string, string, []tools.ToolCall, string, error) {
 	// Build OpenAI-format messages: system first, then caller messages.
 	reqMsgs := make([]toolReqMessage, 0, len(messages)+1)
 	if p.systemPrompt != "" {
@@ -204,7 +206,11 @@ func (p *OpenAIProvider) ChatWithTools(
 		})
 	}
 	for _, m := range messages {
-		rm := toolReqMessage{Role: m.Role, ToolCallID: m.ToolCallID}
+		rm := toolReqMessage{
+			Role:             m.Role,
+			ToolCallID:       m.ToolCallID,
+			ReasoningContent: m.ReasoningContent, // echo back thinking tokens
+		}
 		if m.Content != "" {
 			rm.Content = strPtr(m.Content)
 		}
@@ -244,46 +250,49 @@ func (p *OpenAIProvider) ChatWithTools(
 
 	body, err := json.Marshal(req)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("marshal: %w", err)
+		return "", "", nil, "", fmt.Errorf("marshal: %w", err)
 	}
 
 	url := p.baseURL + "/chat/completions"
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(body))
 	if err != nil {
-		return "", nil, "", fmt.Errorf("create request: %w", err)
+		return "", "", nil, "", fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 	httpReq.Header.Set("Authorization", "Bearer "+p.apiKey)
 
 	resp, err := p.client.Do(httpReq)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("request failed: %w", err)
+		return "", "", nil, "", fmt.Errorf("request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", nil, "", fmt.Errorf("read response: %w", err)
+		return "", "", nil, "", fmt.Errorf("read response: %w", err)
 	}
 	if resp.StatusCode != 200 {
-		return "", nil, "", fmt.Errorf("LLM returned %d: %s", resp.StatusCode, truncateStr(string(respBody), 200))
+		return "", "", nil, "", fmt.Errorf("LLM returned %d: %s", resp.StatusCode, truncateStr(string(respBody), 200))
 	}
 
 	var chatResp toolChatResp
 	if err := json.Unmarshal(respBody, &chatResp); err != nil {
-		return "", nil, "", fmt.Errorf("parse response: %w", err)
+		return "", "", nil, "", fmt.Errorf("parse response: %w", err)
 	}
 	if chatResp.Error != nil {
-		return "", nil, "", fmt.Errorf("LLM error: %s", chatResp.Error.Message)
+		return "", "", nil, "", fmt.Errorf("LLM error: %s", chatResp.Error.Message)
 	}
 	if len(chatResp.Choices) == 0 {
-		return "", nil, "", fmt.Errorf("LLM returned empty choices")
+		return "", "", nil, "", fmt.Errorf("LLM returned empty choices")
 	}
 
 	choice := chatResp.Choices[0]
 	finishReason := choice.FinishReason
+	reasoning := choice.Message.ReasoningContent
 
 	// Tool calls requested — convert to tools.ToolCall slice.
+	// Also capture content/reasoning_content so the caller can echo them back
+	// in the assistant message (required by thinking models like Kimi).
 	if finishReason == "tool_calls" && len(choice.Message.ToolCalls) > 0 {
 		calls := make([]tools.ToolCall, len(choice.Message.ToolCalls))
 		for i, tc := range choice.Message.ToolCalls {
@@ -293,7 +302,11 @@ func (p *OpenAIProvider) ChatWithTools(
 				ArgsJSON: tc.Function.Arguments,
 			}
 		}
-		return "", calls, finishReason, nil
+		msgContent := ""
+		if choice.Message.Content != nil {
+			msgContent = *choice.Message.Content
+		}
+		return msgContent, reasoning, calls, finishReason, nil
 	}
 
 	// Final text reply.
@@ -301,7 +314,7 @@ func (p *OpenAIProvider) ChatWithTools(
 	if choice.Message.Content != nil {
 		content = strings.TrimSpace(*choice.Message.Content)
 	}
-	return content, nil, finishReason, nil
+	return content, reasoning, nil, finishReason, nil
 }
 
 // extractConclusion pulls the last non-empty paragraph from a thinking model's

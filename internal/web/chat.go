@@ -43,6 +43,11 @@ type Action struct {
 
 var actionRe = regexp.MustCompile(`\[ACTION:(pause|resume|token:(\d+))\]`)
 
+// toolXMLRe matches XML-style tool call blocks that some LLMs emit as plain text
+// instead of using the API's structured tool_calls mechanism.
+// Covers both complete blocks and unterminated ones.
+var toolXMLRe = regexp.MustCompile(`(?s)<function_calls>.*?</function_calls>`)
+
 // ── Chat message ──
 
 // ChatMessage is a single turn in the conversation.
@@ -111,7 +116,11 @@ func (s *ChatSession) Chat(ctx context.Context, userMsg string) (string, *Action
 	if tp, ok := s.provider.(tools.ChatToolProvider); ok && mightNeedTools(userMsg) {
 		// Agentic path: tool-calling loop (only when the message likely needs tools).
 		msgs := s.buildToolMessages()
-		reply, err = tools.RunAgentLoop(ctx, tp, msgs, tools.Defaults())
+		var used []tools.ToolUse
+		reply, used, err = tools.RunAgentLoop(ctx, tp, msgs, tools.Defaults())
+		if err == nil && len(used) > 0 {
+			reply = formatToolUses(used) + reply
+		}
 	} else {
 		// Simple path: single-turn answer (conversational messages or non-tool providers).
 		reply, err = s.provider.Answer(ctx, s.buildPrompt())
@@ -123,17 +132,17 @@ func (s *ChatSession) Chat(ctx context.Context, userMsg string) (string, *Action
 	}
 
 	action := extractAction(reply)
-	cleanReply := cleanActionMarkers(reply)
+	finalReply := cleanReply(reply)
 
 	replyTime := time.Now().UTC().Format(time.RFC3339)
-	s.history = append(s.history, ChatMessage{Role: "assistant", Content: cleanReply, Time: replyTime})
+	s.history = append(s.history, ChatMessage{Role: "assistant", Content: finalReply, Time: replyTime})
 
 	// Trim history to prevent unbounded growth.
 	if len(s.history) > maxChatHistory*2 {
 		s.history = s.history[2:]
 	}
 
-	return cleanReply, action, nil
+	return finalReply, action, nil
 }
 
 // toSession exports the in-memory session to a persistable Session struct.
@@ -463,9 +472,27 @@ func extractAction(reply string) *Action {
 	return nil
 }
 
-// cleanActionMarkers removes ACTION markers from the reply text.
-func cleanActionMarkers(reply string) string {
-	return strings.TrimSpace(actionRe.ReplaceAllString(reply, ""))
+// formatToolUses builds a compact tool-use summary prefix for the chat reply.
+// The frontend recognises the [tools:...] prefix and renders it as a badge.
+func formatToolUses(used []tools.ToolUse) string {
+	names := make([]string, 0, len(used))
+	seen := make(map[string]bool)
+	for _, u := range used {
+		if !seen[u.Name] {
+			names = append(names, u.Name)
+			seen[u.Name] = true
+		}
+	}
+	return "[tools:" + strings.Join(names, ",") + "]\n"
+}
+
+// cleanReply removes ACTION markers and any stray XML tool-call blocks from the reply.
+// Some LLMs emit <function_calls>...</function_calls> as plain text instead of using
+// the API's structured tool_calls mechanism; strip those so users never see raw XML.
+func cleanReply(reply string) string {
+	s := actionRe.ReplaceAllString(reply, "")
+	s = toolXMLRe.ReplaceAllString(s, "")
+	return strings.TrimSpace(s)
 }
 
 // mightNeedTools returns true if the message likely requires a tool call.

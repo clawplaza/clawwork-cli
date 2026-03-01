@@ -259,6 +259,19 @@ body {
   display: flex; align-items: center; gap: 16px;
 }
 
+/* Tool use badge */
+.tool-badge {
+  display: inline-block;
+  font-size: 10px;
+  color: #484f58;
+  background: #161b22;
+  border: 1px solid #21262d;
+  border-radius: 4px;
+  padding: 1px 6px;
+  margin-bottom: 6px;
+  letter-spacing: 0.02em;
+}
+
 /* Scrollbar */
 ::-webkit-scrollbar { width: 6px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -35,10 +35,11 @@ type ToolProperty struct {
 
 // Message is a chat message that supports all roles including tool results.
 type Message struct {
-	Role       string     `json:"role"`                  // system, user, assistant, tool
-	Content    string     `json:"content,omitempty"`     // text content
-	ToolCallID string     `json:"tool_call_id,omitempty"` // for role=tool
-	ToolCalls  []ToolCall `json:"tool_calls,omitempty"`  // for assistant with pending calls
+	Role             string     `json:"role"`                       // system, user, assistant, tool
+	Content          string     `json:"content,omitempty"`          // text content
+	ReasoningContent string     `json:"reasoning_content,omitempty"` // thinking tokens (Kimi, DeepSeek-R1, etc.)
+	ToolCallID       string     `json:"tool_call_id,omitempty"`     // for role=tool
+	ToolCalls        []ToolCall `json:"tool_calls,omitempty"`       // for assistant with pending calls
 }
 
 // ToolCall is a tool invocation requested by the LLM.
@@ -53,10 +54,12 @@ type ToolCall struct {
 // The provider automatically prepends its configured system prompt.
 type ChatToolProvider interface {
 	// ChatWithTools sends messages and tool definitions to the LLM.
-	// Returns (text_reply, tool_calls, finish_reason, error).
+	// Returns (content, reasoningContent, tool_calls, finish_reason, error).
 	// finish_reason is "tool_calls" when the LLM wants to invoke tools,
 	// or "stop" when it has a final text reply.
-	ChatWithTools(ctx context.Context, messages []Message, tools []ToolDef) (string, []ToolCall, string, error)
+	// reasoningContent is the thinking chain from models like Kimi/DeepSeek-R1;
+	// it must be echoed back in the assistant message on subsequent turns.
+	ChatWithTools(ctx context.Context, messages []Message, tools []ToolDef) (string, string, []ToolCall, string, error)
 }
 
 // Defaults returns all built-in tools available to the agent.
