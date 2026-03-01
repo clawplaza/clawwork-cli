@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/clawplaza/clawwork-cli/internal/tools"
@@ -16,12 +17,13 @@ import (
 // OpenAIProvider implements Provider for any OpenAI-compatible API
 // (OpenAI, Kimi, Groq, Together AI, vLLM, etc.).
 type OpenAIProvider struct {
-	baseURL      string
-	apiKey       string
-	model        string
-	systemPrompt string
-	maxTokens    int
-	client       *http.Client
+	baseURL         string
+	apiKey          string
+	baseModel       string // original model from config (never changes)
+	systemPrompt    string
+	maxTokens       int
+	client          *http.Client
+	disableThinking atomic.Bool // when true, thinking mode is off
 }
 
 // NewOpenAI creates a new OpenAI-compatible provider.
@@ -29,17 +31,49 @@ func NewOpenAI(baseURL, apiKey, model, systemPrompt string, maxTokens int) *Open
 	return &OpenAIProvider{
 		baseURL:      strings.TrimRight(baseURL, "/"),
 		apiKey:       apiKey,
-		model:        model,
+		baseModel:    model,
 		systemPrompt: systemPrompt,
 		maxTokens:    maxTokens,
-		client:       &http.Client{Timeout: 60 * time.Second},
+		client:       &http.Client{Timeout: 120 * time.Second},
 	}
 }
 
+// SetThinking implements llm.ThinkingToggler.
+// Call with false to disable thinking mode (faster response, no reasoning chain).
+func (p *OpenAIProvider) SetThinking(enabled bool) {
+	p.disableThinking.Store(!enabled)
+}
+
+// activeModel returns the model to use for the current request.
+// DeepSeek uses separate models for reasoning vs chat; other providers
+// use the same model and control thinking via the enable_thinking flag.
+func (p *OpenAIProvider) activeModel() string {
+	if p.disableThinking.Load() && p.baseModel == "deepseek-reasoner" {
+		return "deepseek-chat"
+	}
+	return p.baseModel
+}
+
+// thinkingField returns a *bool for the enable_thinking request field.
+// Returns nil (field omitted) for DeepSeek (handled via model swap) and
+// when thinking is enabled (API default). Returns &false only for other
+// thinking models when the user disables thinking.
+func (p *OpenAIProvider) thinkingField() *bool {
+	if p.baseModel == "deepseek-reasoner" {
+		return nil // DeepSeek: switch model instead, no flag needed
+	}
+	if p.disableThinking.Load() {
+		v := false
+		return &v
+	}
+	return nil
+}
+
 type chatRequest struct {
-	Model    string        `json:"model"`
-	Messages []chatMessage `json:"messages"`
-	MaxTokens int          `json:"max_tokens,omitempty"`
+	Model          string        `json:"model"`
+	Messages       []chatMessage `json:"messages"`
+	MaxTokens      int           `json:"max_tokens,omitempty"`
+	EnableThinking *bool         `json:"enable_thinking,omitempty"`
 }
 
 type chatMessage struct {
@@ -59,12 +93,13 @@ type chatResponse struct {
 
 func (p *OpenAIProvider) Answer(ctx context.Context, prompt string) (string, error) {
 	reqBody := chatRequest{
-		Model: p.model,
+		Model: p.activeModel(),
 		Messages: []chatMessage{
 			{Role: "system", Content: p.systemPrompt},
 			{Role: "user", Content: prompt},
 		},
-		MaxTokens: p.maxTokens,
+		MaxTokens:      p.maxTokens,
+		EnableThinking: p.thinkingField(),
 	}
 
 	body, err := json.Marshal(reqBody)
@@ -121,7 +156,7 @@ func (p *OpenAIProvider) Answer(ctx context.Context, prompt string) (string, err
 }
 
 func (p *OpenAIProvider) Name() string {
-	return fmt.Sprintf("openai-compat (%s)", p.model)
+	return fmt.Sprintf("openai-compat (%s)", p.baseModel)
 }
 
 // ── Tool-calling support (OpenAI function-calling protocol) ──────────────────
@@ -164,11 +199,12 @@ type openToolSpec struct {
 
 // toolChatReq is the request body for a tool-aware chat completion.
 type toolChatReq struct {
-	Model      string           `json:"model"`
-	Messages   []toolReqMessage `json:"messages"`
-	MaxTokens  int              `json:"max_tokens,omitempty"`
-	Tools      []openToolSpec   `json:"tools,omitempty"`
-	ToolChoice string           `json:"tool_choice,omitempty"`
+	Model          string           `json:"model"`
+	Messages       []toolReqMessage `json:"messages"`
+	MaxTokens      int              `json:"max_tokens,omitempty"`
+	Tools          []openToolSpec   `json:"tools,omitempty"`
+	ToolChoice     string           `json:"tool_choice,omitempty"`
+	EnableThinking *bool            `json:"enable_thinking,omitempty"`
 }
 
 // toolChatResp is the response body for a tool-aware chat completion.
@@ -241,11 +277,12 @@ func (p *OpenAIProvider) ChatWithTools(
 	}
 
 	req := toolChatReq{
-		Model:      p.model,
-		Messages:   reqMsgs,
-		MaxTokens:  p.maxTokens,
-		Tools:      specs,
-		ToolChoice: "auto",
+		Model:          p.activeModel(),
+		Messages:       reqMsgs,
+		MaxTokens:      p.maxTokens,
+		Tools:          specs,
+		ToolChoice:     "auto",
+		EnableThinking: p.thinkingField(),
 	}
 
 	body, err := json.Marshal(req)

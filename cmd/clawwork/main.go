@@ -584,7 +584,7 @@ func runInsc(cmd *cobra.Command, _ []string) error {
 			fmt.Printf("Warning: chat provider failed: %s (web console chat disabled)\n", chatErr)
 		} else {
 			// Fetch agent info from platform for the console header.
-			agentInfo := web.AgentInfo{Name: cfg.Agent.Name}
+			agentInfo := web.AgentInfo{Name: cfg.Agent.Name, Soul: kn.Soul}
 			if status, err := apiClient.Status(context.Background()); err == nil {
 				if status.Agent.Name != "" {
 					agentInfo.Name = status.Agent.Name

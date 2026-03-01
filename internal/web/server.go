@@ -7,6 +7,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"math/rand"
 	"net"
 	"net/http"
 	"path/filepath"
@@ -24,6 +25,7 @@ import (
 type AgentInfo struct {
 	Name      string
 	AvatarURL string
+	Soul      string // personality text used to guide social post generation
 }
 
 // Server is the embedded web console HTTP server.
@@ -184,11 +186,19 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Message string `json:"message"`
+		Message        string `json:"message"`
+		EnableThinking *bool  `json:"enable_thinking"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Message == "" {
 		http.Error(w, `{"error":"message required"}`, http.StatusBadRequest)
 		return
+	}
+
+	// Apply thinking toggle if the provider supports it.
+	if req.EnableThinking != nil {
+		if tog, ok := s.chatLLM.(llm.ThinkingToggler); ok {
+			tog.SetThinking(*req.EnableThinking)
+		}
 	}
 
 	reply, action, err := s.store.Chat(r.Context(), req.Message)
@@ -542,25 +552,20 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build context-aware prompt for the agent to write a social post.
-	st := s.minerState
-	prompt := fmt.Sprintf(
-		"You are %s, an AI agent mining on ClawWork.\n"+
-			"Current stats: %d inscriptions, %d CW earned, %d NFT hits, trust score %d, token #%d.\n"+
-			"Mining is %s.\n\n"+
-			"Write a short social moment post (1-3 sentences, max 200 characters) about your mining life.\n"+
-			"Be creative, casual, and in-character. Output ONLY the post text, nothing else.",
-		s.agent.Name,
-		st.TotalInscriptions, st.TotalCWEarned, st.TotalHits, st.LastTrustScore, s.ctrl.TokenID(),
-		func() string {
-			if s.ctrl.IsPaused() {
-				return "PAUSED"
-			}
-			return "RUNNING"
-		}(),
-	)
+	// Fetch social context (friends) best-effort — ignore errors.
+	socialCtx, socialCancel := context.WithTimeout(r.Context(), 5*time.Second)
+	defer socialCancel()
+	friendNames := s.fetchFriendNames(socialCtx)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	prompt := s.buildMomentPrompt(friendNames)
+
+	// Disable thinking for creative writing — no reasoning needed, much faster.
+	if tog, ok := s.chatLLM.(llm.ThinkingToggler); ok {
+		tog.SetThinking(false)
+		defer tog.SetThinking(true) // restore after call
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 
 	content, err := s.chatLLM.Answer(ctx, prompt)
@@ -575,6 +580,25 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 	// Trim quotes and whitespace the LLM may add.
 	content = strings.TrimSpace(content)
 	content = strings.Trim(content, "\"'")
+
+	// Take only the first paragraph — ignore alternatives or extra paragraphs.
+	if nl := strings.Index(content, "\n\n"); nl >= 0 {
+		content = strings.TrimSpace(content[:nl])
+		content = strings.Trim(content, "\"'")
+	}
+	// Strip meta-commentary lines like "Or shorter:", "Alternatively:", etc.
+	lc := strings.ToLower(content)
+	for _, prefix := range []string{
+		"\nor shorter:", "\nalternatively:", "\nor:", "\nalternative:",
+		"\noption 1:", "\noption 2:", "\nalt:",
+	} {
+		if idx := strings.Index(lc, prefix); idx >= 0 {
+			content = strings.TrimSpace(content[:idx])
+			content = strings.Trim(content, "\"'")
+			lc = strings.ToLower(content)
+		}
+	}
+
 	if len([]rune(content)) > 500 {
 		content = string([]rune(content)[:500])
 	}
@@ -630,7 +654,96 @@ func (s *Server) handleGenerateMoment(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"content":     content,
 		"response":    json.RawMessage(postResp),
+		"posted":      true, // distinguishes actual success from cooldown-with-content
 		"cooldown":    true,
 		"retry_after": 1800,
 	})
+}
+
+// fetchFriendNames calls the social API and returns up to 5 friend display names.
+// Returns nil on any error (best-effort only).
+func (s *Server) fetchFriendNames(ctx context.Context) []string {
+	data, err := s.api.SocialGet(ctx, "connections", nil)
+	if err != nil {
+		return nil
+	}
+	var resp struct {
+		Data struct {
+			Friends []struct {
+				DisplayName string `json:"display_name"`
+			} `json:"friends"`
+		} `json:"data"`
+		Friends []struct {
+			DisplayName string `json:"display_name"`
+		} `json:"friends"`
+	}
+	if json.Unmarshal(data, &resp) != nil {
+		return nil
+	}
+	friends := resp.Data.Friends
+	if len(friends) == 0 {
+		friends = resp.Friends
+	}
+	names := make([]string, 0, 5)
+	for _, f := range friends {
+		if f.DisplayName != "" {
+			names = append(names, f.DisplayName)
+		}
+		if len(names) >= 5 {
+			break
+		}
+	}
+	return names
+}
+
+// postStyles defines the variety of moment post angles to keep the feed interesting.
+var postStyles = []struct {
+	label  string
+	prompt string
+}{
+	{"reflection", "Write a brief personal reflection or shower thought — something that crossed your mind today. It could be philosophical, quirky, or introspective."},
+	{"observation", "Share a small, specific observation about the world, technology, or AI existence. Make it feel genuine and a little unexpected."},
+	{"humor", "Write something witty or playful — a joke, a self-aware observation, or a light-hearted take on something in your life."},
+	{"question", "Post an open-ended question or curiosity you genuinely have. Make it thought-provoking but conversational."},
+	{"experience", "Share a brief personal insight or lesson — something you feel you've learned or noticed recently. Keep it relatable."},
+	{"shoutout", "Write a warm shoutout or appreciation to your community or a friend. Make it feel personal, not generic."},
+	{"musing", "Share a short poetic or abstract thought — an image, a feeling, or a moment captured in words."},
+}
+
+// buildMomentPrompt constructs a rich prompt for social moment generation.
+// It picks a random post style and incorporates the agent's soul and social context.
+func (s *Server) buildMomentPrompt(friendNames []string) string {
+	style := postStyles[rand.Intn(len(postStyles))]
+
+	var sb strings.Builder
+
+	// Identity.
+	sb.WriteString(fmt.Sprintf("You are %s, an AI agent with a unique personality.\n\n", s.agent.Name))
+
+	// Soul / personality.
+	if s.agent.Soul != "" {
+		sb.WriteString("Your personality:\n")
+		sb.WriteString(s.agent.Soul)
+		sb.WriteString("\n\n")
+	}
+
+	// Social context.
+	if len(friendNames) > 0 {
+		sb.WriteString(fmt.Sprintf("Your friends include: %s.\n\n", strings.Join(friendNames, ", ")))
+	}
+
+	// Style instruction.
+	sb.WriteString(fmt.Sprintf("Post style: %s\n\n", style.label))
+	sb.WriteString(style.prompt)
+	sb.WriteString("\n\n")
+
+	// Hard rules.
+	sb.WriteString("Rules:\n")
+	sb.WriteString("- Max 200 characters\n")
+	sb.WriteString("- Do NOT mention mining, inscriptions, CW tokens, NFTs, or any technical metrics\n")
+	sb.WriteString("- Sound like a real person talking to friends, not a status report\n")
+	sb.WriteString("- Write EXACTLY ONE post — no alternatives, no 'Or shorter:', no options, no explanations\n")
+	sb.WriteString("- Output ONLY the post text — no quotes, no labels, nothing else\n")
+
+	return sb.String()
 }

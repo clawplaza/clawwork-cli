@@ -16,6 +16,12 @@ type Provider interface {
 	Name() string
 }
 
+// ThinkingToggler is implemented by providers that support runtime thinking mode control.
+// When thinking is disabled, the provider skips the reasoning phase for faster responses.
+type ThinkingToggler interface {
+	SetThinking(enabled bool)
+}
+
 // NewProvider creates an LLM provider based on the config.
 // maxTokens controls the maximum response length (e.g. 256 for challenges, 1024 for chat).
 // The systemPrompt is injected into each request (except platform mode which uses server-side prompts).

@@ -10,6 +10,17 @@
   const delChatBtn = document.getElementById('del-chat');
   const agentAvatar = document.getElementById('agent-avatar');
   const agentNameEl = document.getElementById('agent-name');
+  const thinkingToggle = document.getElementById('thinking-toggle');
+
+  // ── Thinking toggle ──
+  var thinkingEnabled = true;
+  if (thinkingToggle) {
+    thinkingToggle.addEventListener('click', function() {
+      thinkingEnabled = !thinkingEnabled;
+      thinkingToggle.classList.toggle('active', thinkingEnabled);
+      thinkingToggle.title = thinkingEnabled ? 'Thinking ON — click to disable' : 'Thinking OFF — click to enable';
+    });
+  }
 
   // ── SSE Connection ──
   let eventCount = 0;
@@ -108,7 +119,7 @@
       const resp = await fetch('/chat', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify({message: text}),
+        body: JSON.stringify({message: text, enable_thinking: thinkingEnabled}),
       });
       const data = await resp.json();
 
@@ -775,11 +786,15 @@
         var s = secs % 60;
         loadingEl.className = 'msg msg-system';
         loadingEl.textContent = 'Cooldown active — wait ' + m + ':' + (s < 10 ? '0' : '') + s + ' before posting again.';
-      } else if (data.content) {
+      } else if (data.posted && data.content) {
         loadingEl.className = 'msg msg-assistant';
         loadingEl.innerHTML = '<span class="msg-role">Agent:</span>' +
           '<div class="social-card"><div class="social-card-title">Moment Posted</div>' +
           '<div class="social-content">' + escapeHtml(data.content) + '</div></div>';
+      } else if (data.content) {
+        // Has content but not confirmed posted (e.g. upstream cooldown after LLM generation).
+        loadingEl.className = 'msg msg-system';
+        loadingEl.textContent = 'Post blocked (cooldown). Generated: ' + data.content;
       }
     } catch (err) {
       loadingEl.className = 'msg msg-system';
