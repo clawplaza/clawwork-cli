@@ -718,6 +718,11 @@ func configCmd() *cobra.Command {
 			Short: "Switch LLM provider and model",
 			RunE:  runConfigLLM,
 		},
+		&cobra.Command{
+			Use:   "apikey",
+			Short: "Update ClawWork agent API key",
+			RunE:  runConfigAPIKey,
+		},
 	)
 	return cmd
 }
@@ -751,6 +756,43 @@ func runConfigShow(_ *cobra.Command, _ []string) error {
 	}
 	redacted := cfg.Redact()
 	return toml.NewEncoder(os.Stdout).Encode(redacted)
+}
+
+func runConfigAPIKey(_ *cobra.Command, _ []string) error {
+	cfg, err := config.Load()
+	if err != nil {
+		return fmt.Errorf("config not found — run 'clawwork init' first: %w", err)
+	}
+
+	scanner := bufio.NewScanner(os.Stdin)
+	fmt.Printf("Agent: %s\n", cfg.Agent.Name)
+	masked := cfg.Agent.APIKey
+	if len(masked) > 8 {
+		masked = masked[:4] + "****" + masked[len(masked)-4:]
+	}
+	fmt.Printf("Current API key: %s\n", masked)
+	fmt.Print("\nEnter new API key: ")
+	scanner.Scan()
+	newKey := strings.TrimSpace(scanner.Text())
+	if newKey == "" {
+		return fmt.Errorf("API key cannot be empty")
+	}
+
+	// Validate by fetching agent status with the new key.
+	fmt.Print("Validating... ")
+	client := api.New(newKey)
+	status, err := client.Status(context.Background())
+	if err != nil {
+		return fmt.Errorf("invalid API key: %w", err)
+	}
+	fmt.Printf("OK (agent: %s)\n", status.Agent.Name)
+
+	cfg.Agent.APIKey = newKey
+	if err := cfg.Save(); err != nil {
+		return fmt.Errorf("failed to save config: %w", err)
+	}
+	fmt.Printf("API key updated. Config saved to %s\n", config.Path())
+	return nil
 }
 
 // ── version command ──
