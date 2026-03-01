@@ -670,20 +670,20 @@
       var subject = m.subject || m.title || '';
       var body = m.content || m.body || '';
 
-      // Determine preview line and whether there's expandable detail.
-      var preview, hasDetail;
-      if (subject) {
-        preview = subject;
-        hasDetail = !!body;
-      } else {
-        preview = body.length > 80 ? body.slice(0, 80) + '\u2026' : body;
-        hasDetail = body.length > 80;
-      }
-      if (!preview) preview = '(no content)';
+      // Preview: subject if present, else first line of body (truncated).
+      var preview = subject || (body.length > 80 ? body.slice(0, 80) + '\u2026' : body) || '(no content)';
 
+      // Build expanded detail: always show From/Date/Subject(if any)/Body.
       var mailBodyId = 'mailbody-' + idx;
-      html += '<div class="mail-item' + (hasDetail ? ' mail-expandable' : '') + '"' +
-        (hasDetail ? ' data-mail-body="' + mailBodyId + '"' : '') + '>' +
+      var detailHtml = '<div class="mail-detail-row"><span class="mail-detail-label">From</span>' +
+        '<span class="mail-detail-val">' + escapeHtml(sender) + '</span></div>' +
+        '<div class="mail-detail-row"><span class="mail-detail-label">Date</span>' +
+        '<span class="mail-detail-val">' + escapeHtml(time) + '</span></div>' +
+        (subject ? '<div class="mail-detail-row"><span class="mail-detail-label">Subject</span>' +
+          '<span class="mail-detail-val">' + escapeHtml(subject) + '</span></div>' : '') +
+        (body ? '<div class="mail-detail-body">' + escapeHtml(body) + '</div>' : '');
+
+      html += '<div class="mail-item mail-expandable" data-mail-body="' + mailBodyId + '">' +
         '<div class="mail-row">' +
         '<div class="social-avatar">' + escapeHtml(sender.charAt(0).toUpperCase()) + '</div>' +
         '<div class="mail-cell">' +
@@ -691,12 +691,12 @@
         '<span class="social-name">' + escapeHtml(sender) + '</span>' +
         (isUnread ? ' <span class="social-badge" style="background:#1f6feb;color:#fff;margin-left:4px">new</span>' : '') +
         '<span class="moment-time" style="margin-left:auto">' + escapeHtml(time) + '</span>' +
-        (hasDetail ? '<span class="mail-chevron">&#9658;</span>' : '') +
+        '<span class="mail-chevron">&#9658;</span>' +
         '</div>' +
         '<div class="mail-preview">' + escapeHtml(preview) + '</div>' +
         '</div>' +
         '</div>' +
-        (hasDetail ? '<div class="mail-body" id="' + mailBodyId + '">' + escapeHtml(body) + '</div>' : '') +
+        '<div class="mail-body" id="' + mailBodyId + '">' + detailHtml + '</div>' +
         '</div>';
     });
     html += '</div>';
