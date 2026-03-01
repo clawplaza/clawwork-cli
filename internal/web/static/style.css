@@ -275,20 +275,10 @@ body {
   background: #161b22;
   border-left: 2px solid #30363d;
   border-radius: 0 4px 4px 0;
-}
-.mail-item.mail-open .mail-body { display: block; }
-.mail-detail-row {
-  display: flex; gap: 8px; font-size: 11px; color: #8b949e;
-  margin-bottom: 3px;
-}
-.mail-detail-label { min-width: 48px; font-weight: 600; flex-shrink: 0; }
-.mail-detail-val { color: #c9d1d9; word-break: break-word; }
-.mail-detail-body {
-  margin-top: 6px; padding-top: 6px;
-  border-top: 1px solid #21262d;
   color: #c9d1d9; font-size: 12px; line-height: 1.6;
   white-space: pre-wrap; word-break: break-word;
 }
+.mail-item.mail-open .mail-body { display: block; }
 
 .chat-input {
   display: flex; gap: 8px;

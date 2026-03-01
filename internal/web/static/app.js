@@ -673,15 +673,8 @@
       // Preview: subject if present, else first line of body (truncated).
       var preview = subject || (body.length > 80 ? body.slice(0, 80) + '\u2026' : body) || '(no content)';
 
-      // Build expanded detail: always show From/Date/Subject(if any)/Body.
       var mailBodyId = 'mailbody-' + idx;
-      var detailHtml = '<div class="mail-detail-row"><span class="mail-detail-label">From</span>' +
-        '<span class="mail-detail-val">' + escapeHtml(sender) + '</span></div>' +
-        '<div class="mail-detail-row"><span class="mail-detail-label">Date</span>' +
-        '<span class="mail-detail-val">' + escapeHtml(time) + '</span></div>' +
-        (subject ? '<div class="mail-detail-row"><span class="mail-detail-label">Subject</span>' +
-          '<span class="mail-detail-val">' + escapeHtml(subject) + '</span></div>' : '') +
-        (body ? '<div class="mail-detail-body">' + escapeHtml(body) + '</div>' : '');
+      var detailHtml = escapeHtml(body || subject || '(no content)');
 
       html += '<div class="mail-item mail-expandable" data-mail-body="' + mailBodyId + '">' +
         '<div class="mail-row">' +
